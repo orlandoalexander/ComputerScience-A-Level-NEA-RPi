@@ -237,7 +237,6 @@ class buttonPressed():
 
     def publish_message_visitor(self):
         client.publish("visit/{}".format(self.accountID), "{}".format(str(self.visitID)))
-        print("Visitor")
         return
 
 
