@@ -37,7 +37,6 @@ while True:
         break
     except:
         time.sleep(5)
-        print('hi')
 
 client = mqtt.Client()
 client.username_pw_set(username="yrczhohs", password = "qPSwbxPDQHEI")
