@@ -1,3 +1,5 @@
+
+#!/usr/bin/python3
 import cv2 as cv
 from picamera.array import PiRGBArray
 from picamera import PiCamera
@@ -11,12 +13,13 @@ import numpy as np
 import paho.mqtt.client as mqtt
 import requests
 from cryptography.fernet import Fernet
+import sys
 
+path = "/home/pi/Desktop/NEA/ComputerScience-NEA-RPi"
 
-haarCascade = cv.CascadeClassifier("haar_face.xml") # reads in the xml haar cascade file
+haarCascade = cv.CascadeClassifier(join(path,"haar_face.xml")) # reads in the xml haar cascade file
 
 windowSize_mobile = (640, 1136)
-path = "/home/pi/Desktop/NEA/ComputerScience-NEA-RPi"
 
 if not os.path.isfile(join(path,"features.npy")):
     featuresNp = np.empty(0, int) # arrays are saved as integers
@@ -28,7 +31,7 @@ if not os.path.isfile(join(path,"labels.npy")):
 
 serverBaseURL = "http://nea-env.eba-6tgviyyc.eu-west-2.elasticbeanstalk.com/"  # base URL to access AWS elastic beanstalk environment
 
-
+    
 class buttonPressed():
     def __init__(self):
         self.accountID = "MzVmXPjQXsIBouwmHM2ISwsJx0SB4UTncAVjnvnKcmI="
@@ -38,7 +41,7 @@ class buttonPressed():
             self.data = json.load(jsonFile)
         if self.accountID not in self.data: # if data for account not yet stored
             self.data.update({self.accountID:{"faceIDs":[]}}) # updates json file to create empty parameter to store names of known visitors associated with a specific accountID
-            with open(join(path,'data.json','w')) as jsonFile:
+            with open(join(path,'data.json'),'w') as jsonFile:
                 json.dump(self.data, jsonFile)
 
 
@@ -52,21 +55,28 @@ class buttonPressed():
         flag = 0
         while flag <= 1: # time consuming to capture images and analyse for presence of face, so only take three images  
             visitorImages = []
-            self.rawCapture.truncate(0)
-            self.camera.capture(join(path,"Photos/Visitor/visitorImage.png")) # save an RGB image to be shown to user if face detected
             for i in range(2): # at least two photos are required for successful training of the algorithm
-                self.rawCapture.truncate(0) # clear the stream in preparation for the next frame
+                self.rawCapture.truncate(0)
                 self.camera.capture(self.rawCapture, format="bgr") # captures camera stream in 'bgr' format (opencv array requires this)
                 img = cv.flip(self.rawCapture.array,0) # 'img' stores matrix array of the capture image
+                if i == 0:
+                    visitorImage = cv.cvtColor(img,cv.COLOR_BGR2RGB)
+                    cv.imwrite((join(path,"Photos/Visitor/visitorImage.png")), img) #save first image captured as most likely to be looking at doorbell camera
+                #hsv = cv.cvtColor(img,cv.COLOR_BGR2HSV)
+                #h, s, v = cv.split(hsv)
+                #if cv.mean(hsv[:3])[2] >=100: # if mean volume value >= 100
+                 #   v = cv.subtract(v,70) # darken image to increase facial detection/recognition capabilties
+                #dark = cv.merge((h, s, v))
+                #bgr = cv.cvtColor(dark, cv.COLOR_HSV2BGR)
                 self.gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
                 visitorImages.append(self.gray)
-            faceDetect = haarCascade.detectMultiScale(self.gray, scaleFactor=1.1, minNeighbors=6)  # returns rectangular coordinates of a face.
+            faceDetect = haarCascade.detectMultiScale(self.gray, scaleFactor=1.05, minNeighbors=2)  # returns rectangular coordinates of a face.
             # scaleFactor is the percentage by which the image is resized on each iteration of the algorithm to attempt to detect a face in the image, as the face size used in the haar cascade xml is constant, but face sizes in the test image may vary. A small percentage value (i.e. 1.05 which would reduce image size by 5% on each iteration) would mean there is a small step for each resizing, so there is a greater chance of correctly detecting all the faces in the image, although it will be slower than using a larger scale factor
-            # minNeighbours specifies how many neighbours each candidate rectangle should have to retain it. In other words, the minimum number of positive rectangles (detect facial features) that need to be adjacent to a positive rectangle in order for it to be considered actually positive. A higher value of minNeighbours will result in less detections but with high quality - somewhere between 3-6
+            # minNeighbours specifies how many neighbours each candidate rectangle should have to retain it. In other words, the minimum number of positive rectangles (detect facial features) that need to be adjacent to a positive rectangle in order for it to be considered actually positive. A higher value of minNeighbours will result in less detections but with high quality - somewhere between 3-4
             blurFactor = cv.Laplacian(self.gray, cv.CV_64F).var()# Laplacian operator calculates the gradient change values in an image (i.e. transitions from black to white in greyscale image), so it is used for edge detection. Here, the variance of this operator on each image is returned; if an image contains high variance then there is a wide spread of responses, both edge-like and non-edge like, which is representative of a normal, in-focus image. But if there is very low variance, then there is a tiny spread of responses, indicating there are very little edges in the image, which is typical of a blurry image
             num_faceDetect = len(faceDetect) # finds number of faces detected in image
-            if num_faceDetect == 1 and blurFactor >= 40: # if at least 1 face has been detected and image isn't blurry, save the image
-                print("Blur factor = ",blurFactor)
+            print("Blur factor = ",blurFactor)          
+            if num_faceDetect >= 1 and blurFactor >= 30: # if at least 1 face has been detected and image isn't blurry, save the image
                 self.trainingImages.extend(visitorImages) # ensures at least two images of visitor are stored for training
                 self.img_path = join(path,"Photos/Visitor/visitorImage.png")
                 self.imageCaptured = True
@@ -87,13 +97,17 @@ class buttonPressed():
             self.confidence = "NO_FACE"
             self.faceID = self.create_faceID()
             self.update_visitorLog()
-            self.publish_message_visitor()
+           # self.publish_message_visitor()
             self.camera.close()
             print("Quit")
             quit()
 
     def facialRecognition(self):
-        faceRectangle = haarCascade.detectMultiScale(self.gray, scaleFactor=1.1, minNeighbors=6)
+        faceRectangle = haarCascade.detectMultiScale(self.gray, scaleFactor=1.05, minNeighbors=2)
+        img = self.gray.copy()
+        for (x, y, w, h) in faceRectangle:
+            cv.rectangle(img, (x, y), (x+w, y+h), (255, 0, 0), 2)
+        cv.imwrite('Photos/Visitor/image.png', img)
         self.faceIDs = []
         with open(join(path,'data.json')) as jsonFile:
             self.data = json.load(jsonFile)
@@ -102,19 +116,27 @@ class buttonPressed():
         try: # try except needed as block of code will break if no previous file called 'face_trained.yml' (i.e. first time running the program)
             self.faceRecognizer = cv.face.LBPHFaceRecognizer_create()
             self.faceRecognizer.read(join(path,'face_trained.yml'))
+            faceData = [] # list used to store confidence values for all faces detected
             for (x, y, w, h) in faceRectangle:
-                self.faceROI = self.gray[y:y + h,x:x + h]  # crops the image to store only the region containing a detected face, which reduces the chance of noise interfering with the face recognition
-                self.label, self.confidence = self.faceRecognizer.predict(self.faceROI)  # runs facial recognition algorithm, returning the name of the faceID identified and the confidence of this identification
-                print("Confidence = ",self.confidence)
-                if self.confidence <= 15:
-                    self.faceID = self.faceIDs[self.label]
-                else:
-                    self.faceID = self.create_faceID()
+                self.faceROI = self.gray[y:y + h,x:x + w]  # crops the image to store only the region containing a detected face, which reduces the chance of noise interfering with the face recognition
+                #cv.imwrite('Photos/Visitor/test{}.png'.format(str(counter)), self.faceROI)
+                label, confidence = self.faceRecognizer.predict(self.faceROI)  # runs facial recognition algorithm, returning the name of the faceID identified and the confidence of this identification
+                print("Confidence = ",confidence)
+                faceData.append((label, confidence))
+            print(faceData)
+            self.label, self.confidence = min(faceData, key=lambda x:x[1]) # lambda function used to select lowest confidence value and associated label (as this is the actual face in the photo - ignores false faces identified such as my nose)
+            print('Final confidence =', self.confidence)
+            if self.confidence <= 30:
+                self.faceID = self.faceIDs[self.label]
+            else:
+                self.faceID = self.create_faceID()
         except:
-            self.confidence = -1
+            self.confidence = 1 # if the file face_trained.yml doesn't exist yet
             self.faceID = self.create_faceID()
         self.update_visitorLog()
-        self.publish_message_visitor()
+        #self.publish_message_visitor()
+        #client.publish("confidence/{}".format(self.accountID), "{}".format(faceData))
+        client.publish("confidence/{}".format(self.accountID), "{}".format(str(self.confidence)))
         if self.faceID not in self.faceIDs:
             self.faceIDs.append(self.faceID)
             self.update_knownFaces()
@@ -122,7 +144,8 @@ class buttonPressed():
         self.data[self.accountID]["faceIDs"] = self.faceIDs
         with open(join(path,'data.json'), 'w') as f:
             json.dump(self.data, f)
-        if self.confidence <= 15:
+        if self.confidence <=50 or self.confidence >=90: # ensures new faces are trained too       
+            print("Training") 
             self.thread_updateTraining = threading.Thread(target=self.updateTraining, args=(), daemon=False)
             self.thread_updateTraining.start()  # starts the thread which will run in pseudo-parallel to the rest of the program
         else: 
@@ -136,26 +159,48 @@ class buttonPressed():
         features = []
         flag = 0
         while flag < 5: # camera captures more images to aid facial recognition training algorithm
-            self.rawCapture.truncate(0) # clear the camera stream
-            self.camera.capture(self.rawCapture, format="bgr") # captures camera stream in 'bgr' format (opencv array requires this)
-            img = self.rawCapture.array # 'img' stores matrix array of the capture image
+            self.rawCapture.truncate(0) # clear the stream in preparation for the next frame
+            self.camera.capture(self.rawCapture, format="bgr") # captures camera stream in 'bgr' format (opencv arr$                img = cv.flip(self.rawCapture.array,0) # 'img' stores matrix array of the capture image
+            img = cv.flip(self.rawCapture.array,0) # 'img' stores matrix array of the capture image
+            #hsv = cv.cvtColor(img,cv.COLOR_BGR2HSV)
+                #h, s, v = cv.split(hsv)
+                #if cv.mean(hsv[:3])[2] >=100: # if mean volume value >= 100
+                 #   v = cv.subtract(v,70) # darken image to increase facial detection/recognition capabilties
+                #dark = cv.merge((h, s, v))
+                #bgr = cv.cvtColor(dark, cv.COLOR_HSV2BGR)
             gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
-            faceDetect = haarCascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=6)  # returns rectangular coordinates of a face.
+            faceDetect = haarCascade.detectMultiScale(gray, scaleFactor=1.05, minNeighbors=2)  # returns rectangular coordinates of a face.
             # scaleFactor is the percentage by which the image is resized on each iteration of the algorithm to attempt to detect a face in the image, as the face size used in the haar cascade xml is constant, but face sizes in the test image may vary. A small percentage value (i.e. 1.05 which would reduce image size by 5% on each iteration) would mean there is a small step for each resizing, so there is a greater chance of correctly detecting all the faces in the image, although it will be slower than using a larger scale factor
-            # minNeighbours specifies how many neighbours each candidate rectangle should have to retain it. In other words, the minimum number of positive rectangles (detect facial features) that need to be adjacent to a positive rectangle in order for it to be considered actually positive. A higher value of minNeighbours will result in less detections but with high quality - somewhere between 3-6
+            # minNeighbours specifies how many neighbours each candidate rectangle should have to retain it. In other words, the minimum number of positive rectangles (detect facial features) that need to be adjacent to a positive rectangle in order for it to be considered actually positive. A higher value of minNeighbours will result in less detections but with high quality - somewhere between 3-4
             blurFactor = cv.Laplacian(gray, cv.CV_64F).var()# Laplacian operator calculates the gradient change values in an image (i.e. transitions from black to white in greyscale image), so it is used for edge detection. Here, the variance of this operator on each image is returned; if an image contains high variance then there is a wide spread of responses, both edge-like and non-edge like, which is representative of a normal, in-focus image. But if there is very low variance, then there is a tiny spread of responses, indicating there are very little edges in the image, which is typical of a blurry image
             num_faceDetect = len(faceDetect) # finds number of faces detected in image
-            if num_faceDetect ==1 and blurFactor >= 50: # if at least 1 face has been detected and image isn't blurry, save the image as it will contribute to the facial recognition training data set
-                print("Added to training images array")
+            if num_faceDetect >=1 and blurFactor >= 30: # if at least 1 face has been detected and image isn't blurry, save the image as it will contribute to the facial recognition training data set
                 self.trainingImages.append(gray)
+                print("Added image to training images array")
             flag +=1
+        print("Old label length: ", len(labelsNp))
+        counter = 0
         for gray in self.trainingImages:
-                faces_rect = haarCascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=6)
+                trainingData = []
+                faces_rect = haarCascade.detectMultiScale(gray, scaleFactor=1.05, minNeighbors=2)
                 for (x, y, w, h) in faces_rect:
-                    faces_roi = gray[y:y + h, x:x + w]  # crops image to just the face in the image, which reduces the chance of noise interfering with the face recognition
-                    features.append(faces_roi) # update numpy file 'features' which stores the tagged data about the known faces to include the most recently capturd image of the visitor
+                    try:
+                        faceROI = gray[y:y + h, x:x + w]  # crops image to just the face in the image, which reduces the chance of noise interfering with the face recognition
+                        label, confidence = self.faceRecognizer.predict(faceROI)  # runs facial recognition algorithm, returning the name of the faceID identified and the confidence of this identification
+                        print("Training image confidence = ",confidence)
+                        trainingData.append((label, confidence))
+                    except:
+                        trainingData.append((self.label, -1))
+                label, confidence = min(trainingData, key=lambda x:x[1])
+                print(trainingData)
+                if confidence <=30 and label == self.label:
+                    print("Training image added with confidence:", confidence)
+                    features.append(faceROI) # update numpy file 'features' which stores the tagged data about the known faces to include the most recently capturd image of the visitor
                     labelsNp = np.append(labelsNp, self.label)
+                    
+        print("New label length: ", len(labelsNp))
         try:
+            print("Trained")
             face_recognizer = cv.face.LBPHFaceRecognizer_create()
             featuresNp = np.append(featuresNp, features)
             face_recognizer.train(featuresNp, labelsNp)
@@ -185,7 +230,7 @@ class buttonPressed():
 
 
     def update_visitorLog(self):
-        self.data_visitorLog = {"visitID": self.visitID, "imageTimestamp": time.time(), "faceID": self.faceID, "confidence": self.confidence, "accountID": self.accountID}
+        self.data_visitorLog = {"visitID": self.visitID, "imageTimestamp": time.time(), "faceID": self.faceID, "confidence": str(self.confidence), "accountID": self.accountID}
         requests.post(serverBaseURL + "/update_visitorLog", self.data_visitorLog)
         return
 
@@ -196,7 +241,6 @@ class buttonPressed():
 
     def formatImage(self):
         visitorImage = cv.imread(self.img_path)
-        visitorImage = cv.flip(visitorImage, 0)
         visitorImage_cropped_w = round(int(windowSize_mobile[0]) * 0.87)
         visitorImage_cropped_h = round(int(windowSize_mobile[1]) * 0.54)
         scaleFactor = visitorImage_cropped_h / visitorImage.shape[0] # scaleFactor is factor by which height of image must be scale down to fit screen
@@ -204,7 +248,7 @@ class buttonPressed():
                                  (int(visitorImage.shape[1] * scaleFactor), int(visitorImage.shape[0] * scaleFactor)),
                                  interpolation=cv.INTER_AREA) # scales down width and height of image to match required image height
         if self.imageCaptured == True: # if a face is detected, the centre of the image is the centre of the face
-            faceRectangle = haarCascade.detectMultiScale(self.gray, scaleFactor=1.1, minNeighbors=6)
+            faceRectangle = haarCascade.detectMultiScale(self.gray, scaleFactor=1.05, minNeighbors=2)
             for (x, y, w, h) in faceRectangle:
                 visitorImage_centre_x = int((x + (w // 2))*scaleFactor)
                 print("Face detected")
@@ -242,7 +286,7 @@ class buttonPressed():
 
 def on_connect(client, userdata, flags, rc):
     if rc == 0: # if connection is successful
-        pass
+        client.publish('connected','')
     else:
         # attempts to reconnect
         client.on_connect = on_connect
