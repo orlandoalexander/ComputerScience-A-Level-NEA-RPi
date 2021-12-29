@@ -5,7 +5,11 @@ import main_pi
 import threading 
 import paho.mqtt.client as mqtt
 import urllib.request as url
+import os
+from os.path import join
+import json
 
+path = "/home/pi/Desktop/NEA/ComputerScience-NEA-RPi"
 
 GPIO.setwarnings(False) # Ignore warning for now
 GPIO.setmode(GPIO.BOARD) # Use physical pin numbering
@@ -17,9 +21,16 @@ def runThread():
 def run():
     while True: # Run forever
         if GPIO.input(10) == GPIO.HIGH and threading.active_count() == 1:
-                print("Button pressed")
-                thread_run = threading.Thread(target =runThread)
-                thread_run.start()
+            if os.path.isfile(join(path, 'data.json')) == True:
+                with open(join(path,'data.json'), 'r') as jsonFile:
+                    time.sleep(0.5)
+                    data = json.load(jsonFile)
+                    if 'accountID' in data:
+                        print("Button pressed")
+                        thread_run = threading.Thread(target =runThread)
+                        thread_run.start()
+        
+            
 
 def on_connect(client, userdata, flags, rc):
     if rc == 0: # if connection is successful
