@@ -51,29 +51,31 @@ class buttonPressed():
         blurFactors = []
         self.faceDetected = False
         time.sleep(0.155) # delay to allow camera to warm up
-        self.rawCapture.truncate(0)
-        self.camera.capture(self.rawCapture, format="bgr") # captures camera stream in 'bgr' format (opencv array requires this)    
-        attempts = 1
-        while attempts <= 2: # time consuming to capture images and analyse for presence of face, so only attempt process of capturing images twice
+        attempts = 0
+        while attempts < 2: # time consuming to capture images and analyse for presence of face, so only attempt process of capturing images twice
             faceRGBImages = []
             self.rawCapture.truncate(0)
             self.camera.capture(self.rawCapture, format="bgr") # captures camera stream in 'bgr' format (opencv array requires this)
-            img = cv.flip(self.rawCapture.array,0) # 'img' stores matrix array of the capture image
-            faceRGB = cv.cvtColor(img, cv.COLOR_BGR2RGB)
-            faceGray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
-            self.faceRGB = faceRGB
-            self.faceGray = faceGray
-            if attempts == 1:
-                self.uploadImage = threading.Thread(target=self.formatImage, args=(faceRGB,), daemon=False)
+            img = cv.flip(self.rawCapture.array,0) # bgr is format required for opencv, so capture image in this format
+            self.faceBGR = img
+            self.faceGray = cv.cvtColor(self.faceBGR, cv.COLOR_BGR2GRAY) # change to gray for opencv
+            self.faceRGB = cv.cvtColor(self.faceBGR, cv.COLOR_BGR2RGB) # change to rgb for face_recognition module
+            #cv.imshow('gray', self.faceGray)
+            #cv.waitKey(0)
+            #cv.imshow('bgr', self.faceRGB)
+            #cv.waitKey(0)
+            if attempts == 0:
+                self.uploadImage = threading.Thread(target=self.formatImage, args=(self.faceBGR,), daemon=False)
                 self.uploadImage.start()  # starts the thread which will run in pseudo-parallel to the rest of the program
-            faceRGBImages.append(faceRGB)
+            faceRGBImages.append(self.faceRGB)
             # check if face exists as much quicker than doing facial recognition - so can check whether need to capture another image 
-            faceDetected = haarCascade.detectMultiScale(faceGray, scaleFactor=1.1, minNeighbors=6)  # returns rectangular coordinates of a face.
+            faceDetected = haarCascade.detectMultiScale(self.faceGray, scaleFactor=1.01, minNeighbors=6)  # returns rectangular coordinates of a face.
             # scaleFactor is the percentage by which the image is resized on each iteration of the algorithm to attempt to detect a face in the image, as the face size used in the haar cascade xml is constant, but face sizes in the test image may vary. A small percentage value (i.e. 1.05 which would reduce image size by 5% on each iteration) would mean there is a small step for each resizing, so there is a greater chance of correctly detecting all the faces in the image, although it will be slower than using a larger scale factor
             # minNeighbours specifies how many neighbours each candidate rectangle should have to retain it. In other words, the minimum number of positive rectangles (detect facial features) that need to be adjacent to a positive rectangle in order for it to be considered actually positive. A higher value of minNeighbours will result in less detections but with high quality - somewhere between 3-4
-            blurFactor = cv.Laplacian(faceGray, cv.CV_64F).var()# Laplacian operator calculates the gradient change values in an image (i.e. transitions from black to white in greyscale image), so it is used for edge detection. Here, the variance of this operator on each image is returned; if an image contains high variance then there is a wide spread of responses, both edge-like and non-edge like, which is representative of a normal, in-focus image. But if there is very low variance, then there is a tiny spread of responses, indicating there are very little edges in the image, which is typical of a blurry image
+            blurFactor = cv.Laplacian(self.faceGray, cv.CV_64F).var()# Laplacian operator calculates the gradient change values in an image (i.e. transitions from black to white in greyscale image), so it is used for edge detection. Here, the variance of this operator on each image is returned; if an image contains high variance then there is a wide spread of responses, both edge-like and non-edge like, which is representative of a normal, in-focus image. But if there is very low variance, then there is a tiny spread of responses, indicating there are very little edges in the image, which is typical of a blurry image
             num_faceDetected = len(faceDetected) # finds number of faces detected in image
-            if num_faceDetected >= 1 and blurFactor >= 40: # if at least 1 face has been detected and image isn't blurry, save the image
+            print(blurFactor, num_faceDetected)
+            if num_faceDetected >= 1 and blurFactor >= 25: # if at least 1 face has been detected and image isn't blurry, save the image
                 self.trainingImages.extend(faceRGBImages) # ensures at least two images of visitor are stored for training
                 self.faceDetected = True
                 break # two satisfactury images are captured so do not attempt capturing images again
@@ -101,6 +103,7 @@ class buttonPressed():
         data = pickle.loads(open(fileName, "rb").read())
  
         encodings = face_recognition.face_encodings(faceRGB)
+        
 
         # loop over the facial embeddings incase
         # we have multiple embeddings for multiple fcaes
@@ -122,12 +125,20 @@ class buttonPressed():
                     #increase count for the name we got
                     labelCount[label] = labelCount.get(label, 0) + 1 # starts at 0 and adds 1 to counter value
                     #set name which has highest count
-                print(labelCount)
                 label = max(labelCount, key=labelCount.get) # return key with greatest value (i.e. label with greatest number of matches)
                 # will update the list of names
                 # do loop over the recognized faces
-                print('Label',label)
-                return label, True
+                matchCount = labelCount[label]
+                actualCount = 0
+                for i in data['labels']:
+                    if i == label:
+                        actualCount +=1
+                print('Matched labels:', matchCount, 'Total labels:', actualCount) # check what what percentage of traine images sample image matches - avoid false positives
+                if matchCount/actualCount > 0.5:
+                    print('Label',label, 'Count', labelCount)
+                    return label, True
+                else:
+                    return 'Unknown', False
             else:
                 return 'Unknown', False
         return 'Unknown', False
@@ -182,15 +193,16 @@ class buttonPressed():
         while attempts < 2: # camera captures more images to aid facial recognition training algorithm
             self.rawCapture.truncate(0) # clear the stream in preparation for the next frame
             self.camera.capture(self.rawCapture, format="bgr") # captures camera stream in 'bgr' format (opencv arr$                img = cv.flip(self.rawCapture.array,0) # 'img' stores matrix array of the capture image
-            img = cv.flip(self.rawCapture.array,0) # 'img' stores matrix array of the capture image
+            img = cv.flip(self.rawCapture.array,0) # bgr is format required for opencv, so capture image in this format
+            #faceRGB = img
             faceGray = cv.cvtColor(img, cv.COLOR_BGR2GRAY) # faceGray format for haar cascade
             faceRGB = cv.cvtColor(img, cv.COLOR_BGR2RGB) # faceRGB format for facial-recognition module
-            faceDetected = haarCascade.detectMultiScale(faceGray, scaleFactor=1.1, minNeighbors=6)  # returns rectangular coordinates of a face.
+            faceDetected = haarCascade.detectMultiScale(faceGray, scaleFactor=1.01, minNeighbors=6)  # returns rectangular coordinates of a face.
             # scaleFactor is the percentage by which the image is resized on each iteration of the algorithm to attempt to detect a face in the image, as the face size used in the haar cascade xml is constant, but face sizes in the test image may vary. A small percentage value (i.e. 1.05 which would reduce image size by 5% on each iteration) would mean there is a small step for each resizing, so there is a greater chance of correctly detecting all the faces in the image, although it will be slower than using a larger scale factor
             # minNeighbours specifies how many neighbours each candidate rectangle should have to retain it. In other words, the minimum number of positive rectangles (detect facial features) that need to be adjacent to a positive rectangle in order for it to be considered actually positive. A higher value of minNeighbours will result in less detections but with high quality - somewhere between 3-4
             blurFactor = cv.Laplacian(faceGray, cv.CV_64F).var()# Laplacian operator calculates the gradient change values in an image (i.e. transitions from black to white in greyscale image), so it is used for edge detection. Here, the variance of this operator on each image is returned; if an image contains high variance then there is a wide spread of responses, both edge-like and non-edge like, which is representative of a normal, in-focus image. But if there is very low variance, then there is a tiny spread of responses, indicating there are very little edges in the image, which is typical of a blurry image
             num_faceDetected = len(faceDetected) # finds number of faces detected in image
-            if num_faceDetected >=1 and blurFactor >= 40: # if at least 1 face has been detected and image isn't blurry, save the image as it will contribute to the facial recognition training data set
+            if num_faceDetected >=1 and blurFactor >= 25: # if at least 1 face has been detected and image isn't blurry, save the image as it will contribute to the facial recognition training data set
                 self.trainingImages.append(faceRGB)
             attempts +=1
         
@@ -224,6 +236,7 @@ class buttonPressed():
         else:
             trainingData = {'encodings': self.encodings, 'labels': self.labels}
         
+        print(trainingData['labels'])
         f = open(join(path,"trainingData"), "wb")
         f.write(pickle.dumps(trainingData))#to open file in write mode
         f.close()
@@ -282,8 +295,8 @@ class buttonPressed():
         fernet = Fernet(self.accountID.encode()) # instantiate Fernet class with users accountID as the key
         self.data_S3Key = {"accountID": self.accountID}
         hashedKeys = requests.post(serverBaseURL + "/get_S3Key", self.data_S3Key).json() # returns json object with encoded keys
-        accessKey = fernet.decrypt(hashedKeys["accessKey_encoded"].encode()).decode() # encoded byte string returned so must use 'decode()' to decode it
-        secretKey = fernet.decrypt(hashedKeys["secretKey_encoded"].encode()).decode()
+        accessKey = fernet.decrypt(hashedKeys["accessKey_encrypted"].encode()).decode() # encoded byte string returned so must use 'decode()' to decode it
+        secretKey = fernet.decrypt(hashedKeys["secretKey_encrypted"].encode()).decode()
         s3 = boto3.client("s3", aws_access_key_id=accessKey, aws_secret_access_key=secretKey)  # initialises a connection to the S3 client on AWS using the 'accessKey' and 'secretKey' sent to the API
         s3.upload_file(Filename=self.path_visitorImage, Bucket=kwargs["Bucket"], Key=kwargs["Key"])  # uploads the txt file to the S3 bucket called 'nea-audio-messages'. The name of the txt file when it is stored on S3 is the 'messageID' of the audio message which is being stored as a txt file.
         print("Uploaded")

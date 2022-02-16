@@ -39,7 +39,8 @@ def pair():
         pyautogui.press("tab")
         pyautogui.press("enter")
         time.sleep(5)
-        if os.path.isfile('/home/pi/Desktop/NEA/ComputerScience-NEA-RPi/bluetooth/SmartBell.json') == True:
+        path = '/home/pi/Desktop/NEA/ComputerScience-NEA-RPi/bluetooth/'
+        if len(os.listdir(path)) != 0: # if file has been sent
             wifi_connect.run()
             break
         
