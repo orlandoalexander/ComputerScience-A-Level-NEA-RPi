@@ -221,11 +221,11 @@ class buttonPressed():
                 if label == self.label: # if training image  has same label as label of original visitor image captured
                     self.encodings, self.labels = self.train(faceRGB, label)
                     print('Image trained')
-                    cv.imwrite((join(path,"Photos/Visitor/faceRecognised.png")), faceRGB) #save first image captured as most likely to be looking at doorbell camera
+                    cv.imwrite((join(path,"Photos/faceRecognised.png")), faceRGB) #save first image captured as most likely to be looking at doorbell camera
             elif self.faceRecognised == False:
                 self.encodings, self.labels = self.train(faceRGB, self.label)
                 print('Training image is new face')
-                cv.imwrite((join(path,"Photos/Visitor/faceNotRecognised.png")), faceRGB) #save first image captured as most likely to be looking at doorbell camera
+                cv.imwrite((join(path,"Photos/faceNotRecognised.png")), faceRGB) #save first image captured as most likely to be looking at doorbell camera
             
         fileName = join(path,"trainingData")
         if os.path.isfile(fileName):
@@ -287,7 +287,7 @@ class buttonPressed():
             visitorImage_x = 0
         visitorImage_cropped = visitorImage[0:visitorImage.shape[0],
                                visitorImage_x:visitorImage_x + visitorImage_cropped_w] # crops image width to fit screen (with centre of image the face of the visitor, if a face can be detected)
-        self.path_visitorImage = join(path, 'Photos/Visitor/visitorImage.png')
+        self.path_visitorImage = join(path, 'Photos/visitorImage.png')
         cv.imwrite(self.path_visitorImage, visitorImage_cropped)
         self.uploadAWS_image(Bucket="nea-visitor-log", Key = self.visitID)
 
