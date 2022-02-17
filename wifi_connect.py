@@ -7,12 +7,17 @@ path = "/home/pi/Desktop/NEA/ComputerScience-NEA-RPi"
 
 
 def run():
-    with open('/home/pi/Desktop/NEA/ComputerScience-NEA-RPi/bluetooth/SmartBell.json', 'r') as file:
-        data = json.load(file)
+    filePath = join(path, 'bluetooth')
+    file = join(filePath,str(os.listdir(filePath)[0]))
+    with open(file, 'r') as f: # open first (and only) file in bluetooth folder
+        data = json.load(f)
         mySSID = data['ssid']
         passkey = data['psswd']
         SmartBellID = data['id']
         
+        for file in os.listdir(filePath):
+                os.remove(os.path.join(filePath, file))
+                
         newData = {"id": SmartBellID}
         if os.path.isfile(join(path, 'data.json')) == False:
             with open(join(path,'data.json'), 'w') as jsonFile:
@@ -38,4 +43,5 @@ def run():
         os.system('sudo wpa_supplicant -B -c /etc/wpa_supplicant/wpa_supplicant.conf -i wlan0')
 
 
-
+    
+    

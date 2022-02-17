@@ -10,6 +10,7 @@ from os.path import join
 import json
 
 path = "/home/pi/Desktop/NEA/ComputerScience-NEA-RPi"
+training = 'False'
 
 GPIO.setwarnings(False) # Ignore warning for now
 GPIO.setmode(GPIO.BOARD) # Use physical pin numbering
@@ -18,24 +19,33 @@ GPIO.setup(10, GPIO.IN, pull_up_down=GPIO.PUD_DOWN) # Set pin 10 to be an input 
 def runThread():
     main_pi.run()
 
-def run():
+def detect_buttonPressed():
+    initialUse = True
     while True: # Run forever
-        if GPIO.input(10) == GPIO.HIGH and threading.active_count() == 1:
-            if os.path.isfile(join(path, 'data.json')) == True:
-                with open(join(path,'data.json'), 'r') as jsonFile:
-                    time.sleep(0.5)
+        if GPIO.input(10) == GPIO.HIGH:
+            if initialUse != True:
+                with open(join(path,'data.json')) as jsonFile:
                     data = json.load(jsonFile)
-                    if 'accountID' in data:
-                        print("Button pressed")
-                        thread_run = threading.Thread(target =runThread)
-                        thread_run.start()
+                    training = data['training']
+            else:
+                training = 'True'
+                initialUse = False
+            if threading.active_count() == 1 or training == 'True': # doorbell can be rung in new thread while it is training
+                if os.path.isfile(join(path, 'data.json')) == True:
+                    with open(join(path,'data.json'), 'r') as jsonFile:
+                        time.sleep(0.5)
+                        data = json.load(jsonFile)
+                        if 'accountID' in data:
+                            print("Button pressed")
+                            thread_run = threading.Thread(target =runThread)
+                            thread_run.start()
         
-            
+
 
 def on_connect(client, userdata, flags, rc):
     if rc == 0: # if connection is successful
         client.publish("button", "ready")
-        run()
+        detect_buttonPressed()
     else:
         # attempts to reconnect
         client.on_connect = on_connect

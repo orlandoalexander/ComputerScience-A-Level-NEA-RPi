@@ -33,13 +33,13 @@ def on_message(client, userData, msg):
     while True: # Run forever
         if GPIO.input(37) == GPIO.HIGH:
             print("Button pressed")
-            setupAccount(msg)
+            connectDoorbell(msg)
             break
         elif time.time() - time_start > 60:
             break
         
         
-def setupAccount(msg):    
+def connectDoorbell(msg):    
     with open(join(path,'data.json')) as jsonFile:
         data = json.load(jsonFile)
     SmartBellID = str(data['id'])
@@ -50,12 +50,9 @@ def setupAccount(msg):
     with open(join(path,'data.json'), 'w') as jsonFile:
         json.dump(data, jsonFile)
     data_accountID = {"accountID": accountID, 'id': SmartBellID}
-    response = requests.post(serverBaseURL + "/update_SmartBellIDs", data_accountID).text
-    print(response)
-    if response == 'success':
-        client.publish(f'pair/{accountID}', 'success')
-    elif response == 'error':
-        client.publish(f'pair/{accountID}', 'error')
+    paired = requests.post(serverBaseURL + "/update_SmartBellIDs", data_accountID).text
+    client.publish(f'pair/{accountID}', paired)
+
     
 def checkID(currentID):
     while True:
@@ -64,7 +61,7 @@ def checkID(currentID):
         newID = str(data['id'])
         if newID != currentID:
             print('Alteration')
-            SmartBellID = newID
+            SmartBellID = currentID = newID 
             client.unsubscribe(f"id/{currentID}")
             client.subscribe(f"id/{SmartBellID}")
             client.message_callback_add(f"id/{SmartBellID}", on_message)
