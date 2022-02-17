@@ -11,6 +11,9 @@ GPIO.setwarnings(False) # Ignore warning for now
 GPIO.setmode(GPIO.BOARD) # Use physical pin numbering
 GPIO.setup(37, GPIO.IN, pull_up_down=GPIO.PUD_DOWN) # Set pin 10 to be an input pin and set initial value to be pulled low (off)
 
+with open('/home/pi/Desktop/hey.txt', 'w') as file:
+    file.write('hi')
+file.close()
 if os.path.isfile('/home/pi/Desktop/NEA/ComputerScience-NEA-RPi/bluetooth/SmartBell.json') == True:
     os.remove('/home/pi/Desktop/NEA/ComputerScience-NEA-RPi/bluetooth/SmartBell.json')
 
