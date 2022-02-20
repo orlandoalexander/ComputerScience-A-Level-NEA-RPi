@@ -10,7 +10,6 @@ from os.path import join
 import json
 
 path = "/home/pi/Desktop/NEA/ComputerScience-NEA-RPi"
-training = 'False'
 
 GPIO.setwarnings(False) # Ignore warning for now
 GPIO.setmode(GPIO.BOARD) # Use physical pin numbering
@@ -20,48 +19,22 @@ def runThread():
     main_pi.run()
 
 def detect_buttonPressed():
-    initialUse = True
     while True: # Run forever
-        if GPIO.input(10) == GPIO.HIGH:
-            if initialUse != True:
-                with open(join(path,'data.json')) as jsonFile:
-                    data = json.load(jsonFile)
-                    training = data['training']
-            else:
-                training = 'True'
-                initialUse = False
-            if threading.active_count() == 1 or training == 'True': # doorbell can be rung in new thread while it is training
-                if os.path.isfile(join(path, 'data.json')) == True:
-                    with open(join(path,'data.json'), 'r') as jsonFile:
-                        time.sleep(0.5)
-                        data = json.load(jsonFile)
-                        if 'accountID' in data:
-                            print("Button pressed")
-                            thread_run = threading.Thread(target =runThread)
-                            thread_run.start()
-        
-
-
-def on_connect(client, userdata, flags, rc):
-    if rc == 0: # if connection is successful
-        client.publish("button", "ready")
-        detect_buttonPressed()
-    else:
-        # attempts to reconnect
-        client.on_connect = on_connect
-        client.username_pw_set(username="yrczhohs", password = "qPSwbxPDQHEI")
-        client.connect("hairdresser.cloudmqtt.com", 18973)
+        if GPIO.input(10) == GPIO.HIGH and os.path.isfile(join(path, 'data.json')) == True:
+            with open(join(path,'data.json')) as jsonFile:
+                data = json.load(jsonFile)
+                training = data['training']
+            if (threading.active_count() == 1 or training == 'True') and 'accountID' in data:
+                # doorbell can be rung in new thread if there is currently no doorbell thread or when the doorbell thread is in training state AND the doorbell is paired with a user's account ID
+                print("Button pressed")
+                thread_run = threading.Thread(target =runThread)
+                thread_run.start()
 
 while True:
     try:
-        url.urlopen('http://google.com')
+        url.urlopen('http://google.com') # attempts to open 'google.com'
+        detect_buttonPressed()
         break
-    except:
+    except: # if no internet connection is established yet, then wait 5 secs
         time.sleep(5)
 
-client = mqtt.Client()
-client.username_pw_set(username="yrczhohs", password = "qPSwbxPDQHEI")
-client.on_connect = on_connect # creates callback for successful connection with broker
-client.connect("hairdresser.cloudmqtt.com", 18973) # parameters for broker web address and port number
-
-client.loop_forever()

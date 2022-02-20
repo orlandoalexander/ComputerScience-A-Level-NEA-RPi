@@ -14,68 +14,65 @@ serverBaseURL = "http://nea-env.eba-6tgviyyc.eu-west-2.elasticbeanstalk.com/"  #
 
 GPIO.setwarnings(False) # Ignore warning for now
 GPIO.setmode(GPIO.BOARD) # Use physical pin numbering
-GPIO.setup(37, GPIO.IN, pull_up_down=GPIO.PUD_DOWN) # Set pin 10 to be an input pin and set initial value to be pulled low (off)
+GPIO.setup(37, GPIO.IN, pull_up_down=GPIO.PUD_DOWN) # Set pin 37 to be an input pin and set initial value to be pulled low (off)
 
 while True:
-    if os.path.isfile(join(path, 'data.json')) == False:
+    if os.path.isfile(join(path, 'data.json')) == False: # cannot pair doorbell with mobile app unless 'data.json' file has been created, as 'data.json' stores doorbell's unique Smart Bell ID and user's account ID required for mobile app to pair with doorbell
         time.sleep(5)
     else:
-        with open(join(path,'data.json'), 'r') as jsonFile:
-            time.sleep(0.5) # resolves issue with reading file immediately after it is written to (json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0))
-            data = json.load(jsonFile)
-        if 'accountID' in data:
-            accountID = str(data['accountID'])
-            break
+        break
 
 def on_message(client, userData, msg):
+    # callback function called when pairing request sent via MQTT by mobile app
     time_start = time.time()
-    print(msg.payload.decode())
-    while True: # Run forever
-        if GPIO.input(37) == GPIO.HIGH:
+    while True:
+        if GPIO.input(37) == GPIO.HIGH: # if user presses 'Pair' button on doorbell
             print("Button pressed")
-            connectDoorbell(msg)
+            connectDoorbell(msg) # pair the doorbell with the user's account
             break
-        elif time.time() - time_start > 60:
+        elif time.time() - time_start > 60: # pairing request expires 60 seconds after it is initiated by user through mobile app
             break
         
         
-def connectDoorbell(msg):    
+def connectDoorbell(msg):
+    # pair doorbell with user's account
     with open(join(path,'data.json')) as jsonFile:
         data = json.load(jsonFile)
     SmartBellID = str(data['id'])
-    accountID = msg.payload.decode()
-    with open(join(path,'data.json'), 'r') as jsonFile:
-        data = json.load(jsonFile)
-    data['accountID'] = accountID
+    accountID = msg.payload.decode() # decode payload sent by user from mobile app (i.e. users' account ID)
+    data['accountID'] = accountID # store the user's account ID in the 'data.json' file as now paired with that account
     with open(join(path,'data.json'), 'w') as jsonFile:
         json.dump(data, jsonFile)
     data_accountID = {"accountID": accountID, 'id': SmartBellID}
-    paired = requests.post(serverBaseURL + "/update_SmartBellIDs", data_accountID).text
+    paired = requests.post(serverBaseURL + "/update_SmartBellIDs", data_accountID).text # store pairing details in MySQL table
     client.publish(f'pair/{accountID}', paired)
 
     
 def checkID(currentID):
+    # check whether doorbell's unique SmartBell ID has been updated
     while True:
         with open(join(path,'data.json')) as jsonFile:
-                data = json.load(jsonFile)
+            data = json.load(jsonFile)
         newID = str(data['id'])
-        if newID != currentID:
+        if newID != currentID: # if the doorbell's SmartBell ID has been changed
             print('Alteration')
-            SmartBellID = currentID = newID 
-            client.unsubscribe(f"id/{currentID}")
-            client.subscribe(f"id/{SmartBellID}")
-            client.message_callback_add(f"id/{SmartBellID}", on_message)
+            client.unsubscribe(f"id/{currentID}") # unsubscribe from the topic for the old SmartBell ID
+            client.subscribe(f"id/{newID}") # subscribe to the new topic for the updated SmartBell ID
+            client.message_callback_add(f"id/{newID}", on_message)
+            currentID = newID
         time.sleep(5)
         
 
 def on_connect(client, userdata, flags, rc):
+    # called when connection to MQTT broker established
     if rc == 0: # if connection is successful
         with open(join(path,'data.json')) as jsonFile:
             data = json.load(jsonFile)
         SmartBellID = str(data['id'])
-        client.subscribe(f"id/{SmartBellID}")
-        client.message_callback_add(f"id/{SmartBellID}", on_message)
-        checkThread = threading.Thread(target=checkID, args = (SmartBellID,))
+        client.publish(f"connected/{SmartBellID}")
+        client.subscribe(f"id/{SmartBellID}") # mobile app publishes to topic when it wishes to pair a user's account with the doorbell
+        client.message_callback_add(f"id/{SmartBellID}", on_message) # add callback when message received to the topic to indicate pairing request
+        checkThread = threading.Thread(target=checkID, args = (SmartBellID,)) # thread created to persistently verify whether the doorbell's unique SmartBell ID has been altered, and act accordingly if it has been changed
         checkThread.start()
     else:
         # attempts to reconnect
@@ -83,14 +80,13 @@ def on_connect(client, userdata, flags, rc):
         client.username_pw_set(username="yrczhohs", password = "qPSwbxPDQHEI")
         client.connect("hairdresser.cloudmqtt.com", 18973)
 
- 
+# check if Raspberry Pi is connected to the internet before running program
 while True:
     try:
         url.urlopen('http://google.com')
         break
     except:
         time.sleep(5)
-        
     
 client = mqtt.Client()
 client.username_pw_set(username="yrczhohs", password = "qPSwbxPDQHEI")

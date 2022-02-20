@@ -8,11 +8,9 @@ import boto3
 from os.path import join
 import os
 import threading
-import numpy as np
 import paho.mqtt.client as mqtt
 import requests
 from cryptography.fernet import Fernet
-import sys
 import face_recognition
 import pickle
 
@@ -22,10 +20,7 @@ serverBaseURL = "http://nea-env.eba-6tgviyyc.eu-west-2.elasticbeanstalk.com/"  #
 
 haarCascade = cv.CascadeClassifier(join(path,"haar_face_alt2.xml")) # reads in the xml haar cascade file
 
-windowSize_mobile = (640, 1136)
-
-
-
+windowSize_mobile = (640, 1136) # mobile phone screen size
 
 class buttonPressed():
     def __init__(self):
@@ -38,26 +33,23 @@ class buttonPressed():
         with open(join(path,'data.json')) as jsonFile:
             self.data = json.load(jsonFile)
         if self.accountID not in self.data: # if data for account not yet stored
-            self.data.update({self.accountID:{"faceIDs":[]}, "training":"False"}) # updates json file to create empty parameter to store names of known visitors associated with a specific accountID
+            self.data.update({self.accountID:{"faceIDs":[]}}) # updates json file to create empty parameter to store names of known visitors associated with a specific accountID
             with open(join(path,'data.json'),'w') as jsonFile:
                 json.dump(self.data, jsonFile)
-
 
     def captureImage(self):
         self.camera = PiCamera()
         self.rawCapture = PiRGBArray(self.camera) # using PiRGBArray increases efficiency when accessing camera stream 
         self.trainingImages = []
         self.trainingImages_faceRGB = []
-        blurFactors = []
         self.faceDetected = False
         time.sleep(0.155) # delay to allow camera to warm up
         attempts = 0
         while attempts < 2: # time consuming to capture images and analyse for presence of face, so only attempt process of capturing images twice
             faceRGBImages = []
-            self.rawCapture.truncate(0)
+            self.rawCapture.truncate(0) # clear any data from the camera stream
             self.camera.capture(self.rawCapture, format="bgr") # captures camera stream in 'bgr' format (opencv array requires this)
-            img = cv.flip(self.rawCapture.array,0) # bgr is format required for opencv, so capture image in this format
-            self.faceBGR = img
+            self.faceBGR = cv.flip(self.rawCapture.array,0) # bgr is format required for opencv, so capture image in this format
             self.faceGray = cv.cvtColor(self.faceBGR, cv.COLOR_BGR2GRAY) # change to gray for opencv
             self.faceRGB = cv.cvtColor(self.faceBGR, cv.COLOR_BGR2RGB) # change to rgb for face_recognition module
             #cv.imshow('gray', self.faceGray)
