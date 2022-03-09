@@ -20,12 +20,7 @@ while True:
     if os.path.isfile(join(path, 'data.json')) == False:
         time.sleep(5)
     else:
-        with open(join(path,'data.json'), 'r') as jsonFile:
-            time.sleep(0.5) # resolves issue with reading file immediately after it is written to (json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0))
-            data = json.load(jsonFile)
-        if 'accountID' in data:
-            accountID = str(data['accountID'])
-            break
+        break
 
 def on_message(client, userData, msg):
     time_start = time.time()
@@ -73,6 +68,7 @@ def on_connect(client, userdata, flags, rc):
         with open(join(path,'data.json')) as jsonFile:
             data = json.load(jsonFile)
         SmartBellID = str(data['id'])
+        client.publish(f"connected/{SmartBellID}")
         client.subscribe(f"id/{SmartBellID}")
         client.message_callback_add(f"id/{SmartBellID}", on_message)
         checkThread = threading.Thread(target=checkID, args = (SmartBellID,))

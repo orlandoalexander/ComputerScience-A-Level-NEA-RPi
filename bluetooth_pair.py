@@ -11,11 +11,19 @@ GPIO.setwarnings(False) # Ignore warning for now
 GPIO.setmode(GPIO.BOARD) # Use physical pin numbering
 GPIO.setup(37, GPIO.IN, pull_up_down=GPIO.PUD_DOWN) # Set pin 10 to be an input pin and set initial value to be pulled low (off)
 
-with open('/home/pi/Desktop/hey.txt', 'w') as file:
-    file.write('hi')
-file.close()
+
 if os.path.isfile('/home/pi/Desktop/NEA/ComputerScience-NEA-RPi/bluetooth/SmartBell.json') == True:
     os.remove('/home/pi/Desktop/NEA/ComputerScience-NEA-RPi/bluetooth/SmartBell.json')
+
+# make Raspberry Pi discoverable on boot.
+os.system("""sudo bluetoothctl <<EOF
+power on
+discoverable on
+pairable on
+EOF
+""")
+
+
 
 devices = []
 paired_devices = (subprocess.getoutput("""sudo bluetoothctl <<EOF
@@ -31,17 +39,13 @@ for device in devices:
     os.system(command)
     
 def pair():
-    os.system("""sudo bluetoothctl <<EOF
-    power on
-    discoverable on
-    pairable on
-    default-agent
-    """)
+    pyautogui.write("0000")
+    pyautogui.press("enter")
+    time.sleep(2)
+    pyautogui.press("enter")
+    pyautogui.press("enter")
     start = time.time()
     while time.time() - start <120:
-        pyautogui.press("tab")
-        pyautogui.press("enter")
-        time.sleep(5)
         path = '/home/pi/Desktop/NEA/ComputerScience-NEA-RPi/bluetooth/'
         if len(os.listdir(path)) != 0: # if file has been sent
             wifi_connect.run()
