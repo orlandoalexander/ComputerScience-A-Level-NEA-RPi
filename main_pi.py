@@ -265,7 +265,7 @@ class buttonPressed():
 
 
     def update_visitorLog(self):
-        self.data_visitorLog = {"visitID": self.visitID, "imageTimestamp": time.time(), "faceID": self.faceID, "accountID": self.accountID}
+        self.data_visitorLog = {"visitID": self.visitID, "imageTimestamp": (str(time.strftime("%H.%M"))+','+str(time.time())), "faceID": self.faceID, "accountID": self.accountID}
         requests.post(serverBaseURL + "/update_visitorLog", self.data_visitorLog)
         return
 
