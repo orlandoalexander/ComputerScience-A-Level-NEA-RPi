@@ -43,7 +43,7 @@ def playText(client, userData, msg):
     # output typed (text-based) audio message through doorbell's speaker
     messageText = msg.payload.decode()
     TtS(messageText) # convert message text into audio file
-    os.system("cvlc --play-and-exit {}".format(join(path,'audioMessage.wav'))) # play audio message directly through system using command line tool 'cvlc'
+    os.system("cvlc --play-and-exit {}".format(join(path,'audioMessage.wav'))) # play audio message directly through system using command line tool 'omxplayer'
      
 def TtS(text):
     language = "en"
@@ -51,7 +51,7 @@ def TtS(text):
     TtS_obj.save(join(path,"audioMessage.wav")) # save text to speech object as .wav file
     return
     
-def checkAccountID(currentID, ):
+def checkAccountID(currentID, client):
     while True:
         with open(join(path,'data.json')) as jsonFile:
             time.sleep(0.5)
@@ -71,15 +71,16 @@ def checkAccountID(currentID, ):
         
 def on_connect(client, userdata, flags, rc):
     with open(join(path, 'data.json'), 'r') as jsonFile:
+        time.sleep( 0.5)  # resolves issue with reading file immediately after it is written to (json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0))
         data = json.load(jsonFile)
-        accountID = data['accountID'] # load account ID
+        accountID = data['accountID']
     if rc == 0: # if connection is successful
-        # subscribe to necessary topics
+        client.publish("audio", "ready")
         client.subscribe(f"message/audio/{accountID}")
         client.message_callback_add(f"message/audio/{accountID}", playAudio)
         client.subscribe(f"message/text/{accountID}")
         client.message_callback_add(f"message/text/{accountID}", playText)
-        checkThread = threading.Thread(target=checkAccountID, args = (accountID,)) # thread created to check whether any changes to the account ID doorbell is paired with
+        checkThread = threading.Thread(target=checkAccountID, args = (accountID,client))
         checkThread.start()
     else:
         # attempts to reconnect
@@ -96,13 +97,12 @@ while True:
         time.sleep(5)
     
         
+
 print('Client setup')
 client = mqtt.Client()
 client.username_pw_set(username="yrczhohs", password = "qPSwbxPDQHEI")
 client.on_connect = on_connect # creates callback for successful connection with broker
 client.connect("hairdresser.cloudmqtt.com", 18973) # parameters for broker web address and port number
-
-client.loop_forever() # indefinitely checks for messages on topics that client is subscribed to
-
+client.loop_forever() # in procedure as client instance is created inside the procedure
 
 
