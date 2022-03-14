@@ -52,6 +52,7 @@ class buttonPressed():
             self.faceBGR = cv.flip(self.rawCapture.array,0) # bgr is format required for opencv, so capture image in this format
             self.faceGray = cv.cvtColor(self.faceBGR, cv.COLOR_BGR2GRAY) # change to gray for opencv
             self.faceRGB = cv.cvtColor(self.faceBGR, cv.COLOR_BGR2RGB) # change to rgb for face_recognition module
+            print(self.faceGray)
             #cv.imshow('gray', self.faceGray)
             #cv.waitKey(0)
             #cv.imshow('bgr', self.faceRGB)
