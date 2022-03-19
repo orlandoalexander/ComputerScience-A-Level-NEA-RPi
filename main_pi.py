@@ -20,115 +20,80 @@ serverBaseURL = "http://nea-env.eba-6tgviyyc.eu-west-2.elasticbeanstalk.com/"  #
 
 haarCascade = cv.CascadeClassifier(join(path,"haar_face_alt2.xml")) # reads in the xml haar cascade file
 
-windowSize_mobile = (640, 1136) # mobile phone screen size
+windowSize_mobile = (640, 1136) # mobile phone screen size in pixels
 
 class buttonPressed():
     def __init__(self):
         with open(join(path,'data.json'), 'r') as jsonFile: # ensures up-to-date value for accountID is used
-            time.sleep(0.5) # resolves issue with reading file immediately after it is written to (json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0))
-            data = json.load(jsonFile)
-            self.accountID = str(data['accountID'])
-        self.visitID = self.create_visitID()
-        self.publish_message_ring()
-        with open(join(path,'data.json')) as jsonFile:
-            self.data = json.load(jsonFile)
-        if self.accountID not in self.data: # if data for account not yet stored
+            time.sleep(0.5) # avoids concurrent access errors for 'data.json' file
+            self.data = json.load(jsonFile) # load json file as json object
+            self.accountID = str(self.data['accountID']) # retrieve user's account ID stored under key 'accountID' in json object 'data'
+        self.visitID = self.create_visitID() # create unique visit ID for the visit
+        self.publish_message_ring() # transmit MQTT message to the mobile app to notify of visit
+        if self.accountID not in self.data: # if data for account not stored (i.e. doorbell not paired with a user account)
             self.data.update({self.accountID:{"faceIDs":[]}}) # updates json file to create empty parameter to store names of known visitors associated with a specific accountID
             with open(join(path,'data.json'),'w') as jsonFile:
-                json.dump(self.data, jsonFile)
+                json.dump(self.data, jsonFile) # write json object data to json file 'data.json' so stored permanently on Raspberry Pi
 
-    def captureImage(self):
-        self.camera = PiCamera()
+    def captureImage(self): # called when doorbell 'ring' button pressed
+        self.camera = PiCamera() # create instance of Raspberry Pi camera
         self.rawCapture = PiRGBArray(self.camera) # using PiRGBArray increases efficiency when accessing camera stream 
         self.trainingImages = []
-        self.trainingImages_faceRGB = []
         self.faceDetected = False
         time.sleep(0.155) # delay to allow camera to warm up
         attempts = 0
-        while attempts < 2: # time consuming to capture images and analyse for presence of face, so only attempt process of capturing images twice
+        while attempts < 2: # make up to two attempts to capture high quality image of visitor
             faceRGBImages = []
             self.rawCapture.truncate(0) # clear any data from the camera stream
             self.camera.capture(self.rawCapture, format="bgr") # captures camera stream in 'bgr' format (opencv array requires this)
-            self.faceBGR = cv.flip(self.rawCapture.array,0) # bgr is format required for opencv, so capture image in this format
-            self.faceGray = cv.cvtColor(self.faceBGR, cv.COLOR_BGR2GRAY) # change to gray for opencv
-            self.faceRGB = cv.cvtColor(self.faceBGR, cv.COLOR_BGR2RGB) # change to rgb for face_recognition module
-            print(self.faceGray)
-            #cv.imshow('gray', self.faceGray)
-            #cv.waitKey(0)
-            #cv.imshow('bgr', self.faceRGB)
-            #cv.waitKey(0)
-            if attempts == 0:
+            self.faceBGR = cv.flip(self.rawCapture.array,0) # flip image in vertical (0) axis, as camera module is upside down when attached to Raspberry Pi
+            self.faceGray = cv.cvtColor(self.faceBGR, cv.COLOR_BGR2GRAY) # change visitor image to grayscale for OpenCV operations
+            self.faceRGB = cv.cvtColor(self.faceBGR, cv.COLOR_BGR2RGB) # change visitor image to rgb for face-recognition library operations
+            if attempts == 0: # first image of visitor captured
                 self.uploadImage = threading.Thread(target=self.formatImage, args=(self.faceBGR,), daemon=False)
-                self.uploadImage.start()  # starts the thread which will run in pseudo-parallel to the rest of the program
+                self.uploadImage.start()  # starts the thread which will run in pseudo-parallel to the rest of the program to format image for display in mobile app GUI
             faceRGBImages.append(self.faceRGB)
-            # check if face exists as much quicker than doing facial recognition - so can check whether need to capture another image 
-            faceDetected = haarCascade.detectMultiScale(self.faceGray, scaleFactor=1.01, minNeighbors=6)  # returns rectangular coordinates of a face.
-            # scaleFactor is the percentage by which the image is resized on each iteration of the algorithm to attempt to detect a face in the image, as the face size used in the haar cascade xml is constant, but face sizes in the test image may vary. A small percentage value (i.e. 1.05 which would reduce image size by 5% on each iteration) would mean there is a small step for each resizing, so there is a greater chance of correctly detecting all the faces in the image, although it will be slower than using a larger scale factor
-            # minNeighbours specifies how many neighbours each candidate rectangle should have to retain it. In other words, the minimum number of positive rectangles (detect facial features) that need to be adjacent to a positive rectangle in order for it to be considered actually positive. A higher value of minNeighbours will result in less detections but with high quality - somewhere between 3-4
-            blurFactor = cv.Laplacian(self.faceGray, cv.CV_64F).var()# Laplacian operator calculates the gradient change values in an image (i.e. transitions from black to white in greyscale image), so it is used for edge detection. Here, the variance of this operator on each image is returned; if an image contains high variance then there is a wide spread of responses, both edge-like and non-edge like, which is representative of a normal, in-focus image. But if there is very low variance, then there is a tiny spread of responses, indicating there are very little edges in the image, which is typical of a blurry image
-            num_faceDetected = len(faceDetected) # finds number of faces detected in image
-            print(blurFactor, num_faceDetected)
-            if num_faceDetected >= 1 and blurFactor >= 25: # if at least 1 face has been detected and image isn't blurry, save the image
-                self.trainingImages.extend(faceRGBImages) # ensures at least two images of visitor are stored for training
+            # check if face exists as much quicker than doing facial recognition (so can check whether need to capture another image):
+            faceDetected = haarCascade.detectMultiScale(self.faceGray, scaleFactor=1.01, minNeighbors=6)  # returns rectangular coordinates of face bounding box
+            blurFactor = cv.Laplacian(self.faceGray, cv.CV_64F).var() # calculate bluriness of visitor image
+            num_faceDetected = len(faceDetected) # number of faces detected in image
+            if num_faceDetected >= 1 and blurFactor >= 25: # if at least 1 face has been detected and image isn't blurry, image considered suitable
+                self.trainingImages.extend(faceRGBImages) # save visitor images in RGB format to train the facial recognition algorithm
                 self.faceDetected = True
-                break # two satisfactury images are captured so do not attempt capturing images again
+                break # suitable image captured so do not attempt capturing images again
             else:
                 attempts +=1
-        if self.faceDetected == True:
-            print('Face detected')
+        if self.faceDetected == True: # if face detected in visitor image
             self.facialRecognition() # run facial recognition algorithm
-
-        else:
-            print('No face detected')
+        else: # if no face detected in visitor image
             self.faceID = "NO_FACE"
-            self.update_visitorLog()
-            self.camera.close()
-            print("Quit")
+            self.update_visitorLog() # update SQL database to store visit details
+            self.camera.close() # terminate camera instance
             quit()
             
             
-    def recognise(self, faceRGB):
-        # load the known faces and embeddings saved in last file
-        fileName = join(path,"trainingData")
-        if not os.path.isfile(fileName):
-            return 'Unknown', False
-        
-        data = pickle.loads(open(fileName, "rb").read())
- 
-        encodings = face_recognition.face_encodings(faceRGB)
-        
-
-        # loop over the facial embeddings incase
-        # we have multiple embeddings for multiple fcaes
-        for encoding in encodings:
-        #Compare encodings with encodings in data["encodings"]
-        #Matches contain array with boolean values True and False
-            matches = face_recognition.compare_faces(data["encodings"], encoding)
-            #set name =unknown if no encoding matches
-            # check to see if we have found a match
-            if True in matches:
-            #Find precogniseositions at which we get True and store them
-                matchedIndexes = [index for (index, match) in enumerate(matches) if match]
+    def recognise(self, faceRGB): # facial recognition algorithm
+        fileName = join(path,"trainingData") # load the face encodings and labels for trained image data set
+        if not os.path.isfile(fileName): # training image data set doesn't exist yet
+            return 'Unknown', False # face not recognised
+        data = pickle.loads(open(fileName, "rb").read()) # reconstruct dictionary object 'data' from character stream stored in fileName file
+        encodings = face_recognition.face_encodings(faceRGB) # create face encodings for visitor image (test image)
+        for encoding in encodings: # iterate through face encodings in the visitor image as there may be multiple faces in the visitor image
+            matches = face_recognition.compare_faces(data["encodings"], encoding) # compare encoding of face in visitor image with encodings in trained data set
+            # matches contain array with boolean values True and False for each face encoding in 'data'
+            if True in matches: # if there is at least one match for the test image in the training image data set
+                matchedIndexes = [index for (index, match) in enumerate(matches) if match] # store indexes of training set face encodings which match a face encoding in visitor image
                 labelCount = {}
-                # loop over the matched indexes and maintain a count for
-                # each recognized face face
-                for index in matchedIndexes:
-                    #Check the names at respective indexes we stored in matchedIdxs
-                    label = data["labels"][index]
-                    #increase count for the name we got
-                    labelCount[label] = labelCount.get(label, 0) + 1 # starts at 0 and adds 1 to counter value
-                    #set name which has highest count
-                label = max(labelCount, key=labelCount.get) # return key with greatest value (i.e. label with greatest number of matches)
-                # will update the list of names
-                # do loop over the recognized faces
-                matchCount = labelCount[label]
-                actualCount = 0
-                for i in data['labels']:
-                    if i == label:
+                for index in matchedIndexes: # loop over the matched indexes and store a count for each face in training data set which matches the test image
+                    label = data["labels"][index] # get the label associated with the face encoding at index 'index'
+                    labelCount[label] = labelCount.get(label,0) + 1 # increment counter (value) for label (key) of face encoding stored at 'index', indicating that test image has match with this label
+                label = max(labelCount, key=labelCount.get) # return key with greatest value (i.e. label of face in training image data set with greatest number of matches)
+                matchCount = labelCount[label] # number of matches for label assigned to visitor image
+                actualCount = 0 # stores total number of face encodings with same label as label assigned to visitor image
+                for i in data['labels']: # iterate through each label in trained data set
+                    if i == label: # label in trained data set is same as label assigned to visitor image
                         actualCount +=1
-                print('Matched labels:', matchCount, 'Total labels:', actualCount) # check what what percentage of traine images sample image matches - avoid false positives
-                if matchCount/actualCount > 0.5:
-                    print('Label',label, 'Count', labelCount)
+                if matchCount/actualCount > 0.5: # if visitor image matches more than 50% of training data set images with same label
                     return label, True
                 else:
                     return 'Unknown', False
@@ -137,101 +102,85 @@ class buttonPressed():
         return 'Unknown', False
 
 
-    def facialRecognition(self):        
+    def facialRecognition(self): # driver method for facial recognition algorithm
         self.faceIDs = []
         with open(join(path,'data.json')) as jsonFile:
-            self.data = json.load(jsonFile)
-            for faceID in self.data[self.accountID]["faceIDs"]:
-                self.faceIDs.append(faceID)
-        
-        self.label, self.faceRecognised = self.recognise(self.faceRGB) # get label for captured training image
+            self.data = json.load(jsonFile) # load json object from 'data.json' file
+            self.faceIDs = [faceID for faceID in self.data[self.accountID]["faceIDs"]] # store all face IDs associated with user's account in array
 
-        if self.faceRecognised == True:
-            self.faceID = self.faceIDs[self.label]
-            print('Face ID:', self.faceID) 
-        else:
-            self.faceID = self.create_faceID()
-            print('New face')
+        self.label, self.faceRecognised = self.recognise(self.faceRGB) # execute facial recognition algorithm to retrieve label for captured visitor image
 
-        self.update_visitorLog()
+        if self.faceRecognised == True: # if face recognised in visitor image
+            self.faceID = self.faceIDs[self.label] # retrieve face ID for face label detected in visitor image
+        else: # if no face recognised in visitor image
+            self.faceID = self.create_faceID() # create new face ID for face in visitor image
+
+        self.update_visitorLog() # update SQL database to store visit details
         
-        if self.faceID not in self.faceIDs: # if new face 
+        if self.faceID not in self.faceIDs: # if visitor image is new face
             self.faceIDs.append(self.faceID)
-            self.label = self.faceIDs.index(self.faceID) # create new label if face doesn't currently exist
-            self.update_knownFaces()
+            self.label = self.faceIDs.index(self.faceID) # create new label which corresponds to index of new face ID in face IDs array
+            self.update_knownFaces() # store details for new face
             
         with open(join(path,'data.json'), 'w') as jsonFile:
             json.dump(self.data, jsonFile)
-        print("Training") 
-        self.thread_updateTraining = threading.Thread(target=self.updateTraining, args=(), daemon=False)
-        self.thread_updateTraining.start()  # starts the thread which will run in pseudo-parallel to the rest of the program
+        self.thread_updateTraining = threading.Thread(target=self.updateTraining, args=(), daemon=False) # create thread to train facial recognition algorithm
+        self.thread_updateTraining.start()  # starts the thread which will run in pseudo-parallel to the rest of the program to train facial recognition algorithm
            
-           
-           
-    def train(self, faceRGB, label):
-        boxes = face_recognition.face_locations(faceRGB,model='hog')
-        # compute the facial embedding for the any face
-        encodings = face_recognition.face_encodings(faceRGB, boxes)
-        # loop over the encodings
-        for encoding in encodings:
+    def train(self, faceRGB, label): # train facial recognition algorithm
+        boxes = face_recognition.face_locations(faceRGB,model='hog') # bounding box around face location in image
+        encodings = face_recognition.face_encodings(faceRGB, boxes) # compute the facial encodings for the face
+        for encoding in encodings: # loop through each face encoding in image
             self.encodings.append(encoding)
             self.labels.append(label)
         return self.encodings, self.labels
         
     
-    def updateTraining(self):
-        self.encodings = []
-        self.labels = []
+    def updateTraining(self): # driver method for training algorithm
+        self.encodings = [] # store face encodings for trained data set
+        self.labels = [] # store corresponding face labels for trained data set
         attempts = 0
-        while attempts < 2: # camera captures more images to aid facial recognition training algorithm
-            self.rawCapture.truncate(0) # clear the stream in preparation for the next frame
-            self.camera.capture(self.rawCapture, format="bgr") # captures camera stream in 'bgr' format (opencv arr$                img = cv.flip(self.rawCapture.array,0) # 'img' stores matrix array of the capture image
-            img = cv.flip(self.rawCapture.array,0) # bgr is format required for opencv, so capture image in this format
-            #faceRGB = img
-            faceGray = cv.cvtColor(img, cv.COLOR_BGR2GRAY) # faceGray format for haar cascade
-            faceRGB = cv.cvtColor(img, cv.COLOR_BGR2RGB) # faceRGB format for facial-recognition module
-            faceDetected = haarCascade.detectMultiScale(faceGray, scaleFactor=1.01, minNeighbors=6)  # returns rectangular coordinates of a face.
-            # scaleFactor is the percentage by which the image is resized on each iteration of the algorithm to attempt to detect a face in the image, as the face size used in the haar cascade xml is constant, but face sizes in the test image may vary. A small percentage value (i.e. 1.05 which would reduce image size by 5% on each iteration) would mean there is a small step for each resizing, so there is a greater chance of correctly detecting all the faces in the image, although it will be slower than using a larger scale factor
-            # minNeighbours specifies how many neighbours each candidate rectangle should have to retain it. In other words, the minimum number of positive rectangles (detect facial features) that need to be adjacent to a positive rectangle in order for it to be considered actually positive. A higher value of minNeighbours will result in less detections but with high quality - somewhere between 3-4
-            blurFactor = cv.Laplacian(faceGray, cv.CV_64F).var()# Laplacian operator calculates the gradient change values in an image (i.e. transitions from black to white in greyscale image), so it is used for edge detection. Here, the variance of this operator on each image is returned; if an image contains high variance then there is a wide spread of responses, both edge-like and non-edge like, which is representative of a normal, in-focus image. But if there is very low variance, then there is a tiny spread of responses, indicating there are very little edges in the image, which is typical of a blurry image
-            num_faceDetected = len(faceDetected) # finds number of faces detected in image
-            if num_faceDetected >=1 and blurFactor >= 25: # if at least 1 face has been detected and image isn't blurry, save the image as it will contribute to the facial recognition training data set
-                self.trainingImages.append(faceRGB)
+
+        while attempts < 2: # make up to two attempts to capture high quality image of visitor
+            self.rawCapture.truncate(0) # clear any data from the camera stream
+            self.camera.capture(self.rawCapture, format="bgr") # captures camera stream in 'bgr' format (opencv array requires this)
+            self.faceBGR = cv.flip(self.rawCapture.array,0) # flip image in vertical (0) axis, as camera module is upside down when attached to Raspberry Pi
+            self.faceGray = cv.cvtColor(self.faceBGR, cv.COLOR_BGR2GRAY) # change visitor image to grayscale for OpenCV operations
+            self.faceRGB = cv.cvtColor(self.faceBGR, cv.COLOR_BGR2RGB) # change visitor image to rgb for face-recognition library operations
+            faceDetected = haarCascade.detectMultiScale(self.faceGray, scaleFactor=1.01, minNeighbors=6)  # returns rectangular coordinates of face bounding box
+            blurFactor = cv.Laplacian(self.faceGray, cv.CV_64F).var() # calculate bluriness of visitor image
+            num_faceDetected = len(faceDetected) # number of faces detected in image
+            if num_faceDetected >= 1 and blurFactor >= 25: # if at least 1 face has been detected and image isn't blurry, image considered suitable
+                self.trainingImages.extend(self.faceRGB) # save visitor images in RGB format to train the facial recognition algorithm
             attempts +=1
         
         self.camera.close()
 
-        self.data[self.accountID]["faceIDs"] = self.faceIDs
-        self.data['training'] = 'True' # new doorbell ringing thread can now be created as camera is closed
+        self.data[self.accountID]["faceIDs"] = self.faceIDs # update face IDs in json object
+        self.data['training'] = 'True' # status message to indicate that training is complete and camera instance has been closed, so can now ring doorbell again with new camera instance (avoids concurrent camera access errors)
         
         with open(join(path,'data.json'), 'w') as jsonFile:
             json.dump(self.data, jsonFile)
             
-        for faceRGB in self.trainingImages:
-            newFace_data = []
-            if self.faceRecognised == True:
-                label, faceRecognised = self.recognise(faceRGB) # get label for captured training image
-                if label == self.label: # if training image  has same label as label of original visitor image captured
-                    self.encodings, self.labels = self.train(faceRGB, label)
-                    print('Image trained')
-                    cv.imwrite((join(path,"Photos/faceRecognised.png")), faceRGB) #save first image captured as most likely to be looking at doorbell camera
-            elif self.faceRecognised == False:
-                self.encodings, self.labels = self.train(faceRGB, self.label)
-                print('Training image is new face')
-                cv.imwrite((join(path,"Photos/faceNotRecognised.png")), faceRGB) #save first image captured as most likely to be looking at doorbell camera
-            
-        fileName = join(path,"trainingData")
-        if os.path.isfile(fileName):
-             # load the known faces and embeddings saved in last file
-            trainingData = pickle.loads(open(join(path,"trainingData"), "rb").read())
-            trainingData['encodings'].extend(self.encodings) # add latest visitor image encoding data to list as new data elements
-            trainingData['labels'].extend(self.labels)
+        for faceRGB in self.trainingImages: # iterate through image arrays for each training image
+            if self.faceRecognised == True: # if face identified in test visitor image
+                label, faceRecognised = self.recognise(faceRGB) # get face label for training image
+                if label == self.label: # if training image  has same label as label of test visitor image
+                    self.encodings, self.labels = self.train(faceRGB, label) # train facial recognition algorithm and update face encodings and labels
+            elif self.faceRecognised == False: # if no face identified in test visitor image
+                self.encodings, self.labels = self.train(faceRGB, self.label) # train facial recognition algorithm and update face encodings and labels for new face label
+
+        fileName = join(path, "trainingData")  # load the face encodings and labels for trained image data set
+        if os.path.isfile(fileName): # training image data set exists
+            trainingData = pickle.loads(open(join(path,"trainingData"), "rb").read()) # reconstruct dictionary object 'trainingData' from character stream stored in 'trainingData' file
+            trainingData['encodings'].extend(self.encodings) # append latest version of visitor image face encodings to training data
+            trainingData['labels'].extend(self.labels) # append latest version of visitor image labels to tr?@aining data
         else:
             trainingData = {'encodings': self.encodings, 'labels': self.labels}
         
         print(trainingData['labels'])
         f = open(join(path,"trainingData"), "wb")
-        f.write(pickle.dumps(trainingData))#to open file in write mode
+        f.write(pickle.dumps(trainingData)) # to open file in write mode
         f.close()
         #to close file
             
@@ -268,18 +217,18 @@ class buttonPressed():
         return
 
     def formatImage(self, visitorImage):
-        visitorImage_cropped_w = round(int(windowSize_mobile[0]) * 0.93)
-        visitorImage_cropped_h = round(int(windowSize_mobile[1]) * 0.54)
-        scaleFactor = visitorImage_cropped_h / visitorImage.shape[0] # scaleFactor is factor by which height of image must be scale down to fit screen
+        visitorImage_cropped_w = round(int(windowSize_mobile[0]) * 0.93) # target width of visitor image
+        visitorImage_cropped_h = round(int(windowSize_mobile[1]) * 0.54) # target height of visitor image
+        scaleFactor = visitorImage_cropped_h / visitorImage.shape[0] # factor by which height of image must be scale down to fit screen
         visitorImage = cv.resize(visitorImage,
                                  (int(visitorImage.shape[1] * scaleFactor), int(visitorImage.shape[0] * scaleFactor)),
                                  interpolation=cv.INTER_AREA) # scales down width and height of image to match required image height
-        visitorImage_centre_x = visitorImage.shape[1]//2
-        visitorImage_x = visitorImage_centre_x - visitorImage_cropped_w // 2  # floored division for pixels as must be integer
-        if visitorImage_x < 0:
+        visitorImage_centre_x = visitorImage.shape[1]//2 # x-coordinate of horizontal middle of image
+        visitorImage_x = visitorImage_centre_x - visitorImage_cropped_w // 2  # start x-coordinate of visitor image
+        if visitorImage_x < 0: # if desired start x-coordinate of image is negative, set start x-coordinate to 0
             visitorImage_x = 0
         visitorImage_cropped = visitorImage[0:visitorImage.shape[0],
-                               visitorImage_x:visitorImage_x + visitorImage_cropped_w] # crops image width to fit screen (with centre of image the face of the visitor, if a face can be detected)
+                               visitorImage_x:visitorImage_x + visitorImage_cropped_w] # crops image width to fit screen
         self.path_visitorImage = join(path, 'Photos/visitorImage.png')
         cv.imwrite(self.path_visitorImage, visitorImage_cropped)
         self.uploadAWS_image(Bucket="nea-visitor-log", Key = self.visitID)
@@ -287,22 +236,18 @@ class buttonPressed():
     def uploadAWS_image(self, **kwargs):
         fernet = Fernet(self.accountID.encode()) # instantiate Fernet class with users accountID as the key
         self.data_S3Key = {"accountID": self.accountID}
-        hashedKeys = requests.post(serverBaseURL + "/get_S3Key", self.data_S3Key).json() # returns json object with encoded keys
-        accessKey = fernet.decrypt(hashedKeys["accessKey_encrypted"].encode()).decode() # encoded byte string returned so must use 'decode()' to decode it
-        secretKey = fernet.decrypt(hashedKeys["secretKey_encrypted"].encode()).decode()
+        encodedKeys = requests.post(serverBaseURL + "/get_S3Key", self.data_S3Key).json() # returns json object with encoded keys
+        accessKey = fernet.decrypt(encodedKeys["accessKey_encrypted"].encode()).decode() # decode access key using 'accountID' encryption key
+        secretKey = fernet.decrypt(encodedKeys["secretKey_encrypted"].encode()).decode() # decode secret key using 'accountID' encryption key
         s3 = boto3.client("s3", aws_access_key_id=accessKey, aws_secret_access_key=secretKey)  # initialises a connection to the S3 client on AWS using the 'accessKey' and 'secretKey' sent to the API
-        s3.upload_file(Filename=self.path_visitorImage, Bucket=kwargs["Bucket"], Key=kwargs["Key"])  # uploads the txt file to the S3 bucket called 'nea-audio-messages'. The name of the txt file when it is stored on S3 is the 'messageID' of the audio message which is being stored as a txt file.
+        s3.upload_file(Filename=self.path_visitorImage, Bucket=kwargs["Bucket"], Key=kwargs["Key"])  # uploads the image file to the S3 bucket called 'nea-audio-messages'. The name of the txt file when it is stored on S3 is the 'messageID' of the audio message which is being stored as a txt file.
         print("Uploaded")
-  
         return
     
     def publish_message_ring(self):
         client.publish("ring/{}".format(self.accountID), "{}".format(str(self.visitID)))
         return
 
-    def publish_message_visitor(self):
-        client.publish("visit/{}".format(self.accountID), "{}".format(str(self.visitID)))
-        return
     
 
 

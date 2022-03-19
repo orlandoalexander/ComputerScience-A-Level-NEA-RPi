@@ -48,14 +48,14 @@ def updateLabels(faceIDs_update, accountID):
         for faceID in data[accountID]["faceIDs"]:
             faceIDs.append(faceID) # store all the faceIDs associated with user's account
     trainingData = pickle.loads(open(join(path,"trainingData"), "rb").read()) # load known face encodings
-    newFaceID_update = faceIDs_update.pop(0)[0] # access and remove first face ID of the two face IDs assigned to the same name - both face IDs will be assigned to this new face ID
-    newLabel = faceIDs.index(newFaceID_update) # value of label of new face ID     
+    newFaceID_update = faceIDs_update.pop(0)[0] # access and remove first face ID of the face IDs assigned to the duplicate name - all face IDs associated with the duplicate name will be assigned to this new face ID
+    newLabel = faceIDs.index(newFaceID_update) # value of label of new face ID
     oldFaceID_update = faceIDs_update.pop(0)[0] # old face ID which is to be assigned to new face ID
     oldLabel = faceIDs.index(oldFaceID_update) # label of old face ID
     faceIDs[oldLabel] = newFaceID_update # replace old face ID with new face ID
     print(trainingData['labels'])
-    for (index, label) in enumerate(trainingData['labels']): # iterate through labels stored in 'trainingData' and replace the old labels with the new label, so the new label/face ID will be tagged to the face encodings associated with the old label and new label
-        if label == oldLabel:
+    for (index, label) in enumerate(trainingData['labels']): # iterate through labels stored in 'trainingData' and replace the old labels with the new label, so the new label/face ID will be tagged to the face encodings of the duplicate face names
+        if label == oldLabel: # if label needs to be updated
             trainingData['labels'][index] = newLabel # change label value of old label to new label
     print(trainingData['labels'])
     data[accountID]["faceIDs"] = faceIDs # save updated face IDs
