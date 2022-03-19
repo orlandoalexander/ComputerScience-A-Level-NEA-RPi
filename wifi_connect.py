@@ -6,9 +6,9 @@ from os.path import join
 path = "/home/pi/Desktop/NEA/ComputerScience-NEA-RPi"
 
 def run():
-    filePath = join(path, 'bluetooth') # filepath to open 'SmartBell.json' file sent my PC over bluetooth
+    filePath = join(path, 'bluetooth') # filepath to open 'SmartBell.json' file sent my PC over bluetooth storing wifi connection details
     file = join(filePath,str(os.listdir(filePath)[0]))
-    with open(file, 'r') as f: # 'SmartBell.json' file
+    with open(file, 'r') as f:
         data = json.load(f)
         mySSID = data['ssid'] # WiFi network SSID
         passkey = data['psswd'] # WiFi network password
@@ -35,10 +35,8 @@ def run():
             time.sleep(5)
         except:
             pass
-        command = (('wpa_passphrase "{}" "{}" | sudo tee -a /etc/wpa_supplicant/wpa_supplicant.conf').format(mySSID, passkey))
-        # appends the correctly formatted network data to the WiFi configuration file 'wpa_supplicant'
+        command = (('wpa_passphrase "{}" "{}" | sudo tee -a /etc/wpa_supplicant/wpa_supplicant.conf').format(mySSID, passkey)) # appends the correctly formatted network data to the WiFi configuration file 'wpa_supplicant'
         os.system(command) # execute command through terminal
         time.sleep(5)
-        os.system('sudo wpa_supplicant -B -c /etc/wpa_supplicant/wpa_supplicant.conf -i wlan0')
-        # wpa_supplicant automatically selects best network from 'wpa_supplicant.conf' to connect with and runs the WiFi connection process
+        os.system('sudo wpa_supplicant -B -c /etc/wpa_supplicant/wpa_supplicant.conf -i wlan0') # wpa_supplicant automatically selects best network from 'wpa_supplicant.conf' to connect with and runs the WiFi connection process
 

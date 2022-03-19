@@ -35,7 +35,8 @@ class buttonPressed():
             with open(join(path,'data.json'),'w') as jsonFile:
                 json.dump(self.data, jsonFile) # write json object data to json file 'data.json' so stored permanently on Raspberry Pi
 
-    def captureImage(self): # called when doorbell 'ring' button pressed
+    def captureImage(self):
+        # called when doorbell 'ring' button pressed
         self.camera = PiCamera() # create instance of Raspberry Pi camera
         self.rawCapture = PiRGBArray(self.camera) # using PiRGBArray increases efficiency when accessing camera stream 
         self.trainingImages = []
@@ -72,7 +73,8 @@ class buttonPressed():
             quit()
             
             
-    def recognise(self, faceRGB): # facial recognition algorithm
+    def recognise(self, faceRGB):
+        # facial recognition algorithm
         fileName = join(path,"trainingData") # load the face encodings and labels for trained image data set
         if not os.path.isfile(fileName): # training image data set doesn't exist yet
             return 'Unknown', False # face not recognised
@@ -102,7 +104,8 @@ class buttonPressed():
         return 'Unknown', False
 
 
-    def facialRecognition(self): # driver method for facial recognition algorithm
+    def facialRecognition(self):
+        # driver method for facial recognition algorithm
         self.faceIDs = []
         with open(join(path,'data.json')) as jsonFile:
             self.data = json.load(jsonFile) # load json object from 'data.json' file
@@ -136,7 +139,8 @@ class buttonPressed():
         return self.encodings, self.labels
         
     
-    def updateTraining(self): # driver method for training algorithm
+    def updateTraining(self):
+        # driver method for training algorithm
         self.encodings = [] # store face encodings for trained data set
         self.labels = [] # store corresponding face labels for trained data set
         attempts = 0
@@ -174,49 +178,49 @@ class buttonPressed():
         if os.path.isfile(fileName): # training image data set exists
             trainingData = pickle.loads(open(join(path,"trainingData"), "rb").read()) # reconstruct dictionary object 'trainingData' from character stream stored in 'trainingData' file
             trainingData['encodings'].extend(self.encodings) # append latest version of visitor image face encodings to training data
-            trainingData['labels'].extend(self.labels) # append latest version of visitor image labels to tr?@aining data
-        else:
-            trainingData = {'encodings': self.encodings, 'labels': self.labels}
+            trainingData['labels'].extend(self.labels) # append latest version of visitor image labels to training data
+        else: # training image data set doesn't exist
+            trainingData = {'encodings': self.encodings, 'labels': self.labels} # create new dictionary storing face encodings and labels for trained data set
         
-        print(trainingData['labels'])
         f = open(join(path,"trainingData"), "wb")
-        f.write(pickle.dumps(trainingData)) # to open file in write mode
+        f.write(pickle.dumps(trainingData)) # dump training data dictionary object as character stream to 'trainingData'
         f.close()
-        #to close file
-            
+
         self.data['training'] = 'False'
         with open(join(path,'data.json'), 'w') as jsonFile:
             json.dump(self.data, jsonFile)
-            
-        print("Quit")
+        client.disconnect() # disconnect client from MQTT broker
         quit()
 
 
     def create_visitID(self):
         # creates a unique visitID for each visit
-        self.data_vistID = {"field": "visitID"}
-        visitID = requests.post(serverBaseURL + "/create_ID", self.data_vistID).text
+        data_vistID = {"field": "visitID"} # dictionary passed to REST API path to specify that required ID is visit ID
+        visitID = requests.post(serverBaseURL + "/create_ID", data_vistID).text # REST API path generate new unique visit ID
         return visitID
 
 
     def create_faceID(self):
         # creates a unique faceID for the face captured
-        self.data_faceID = {"field": "faceID"}
-        faceID = requests.post(serverBaseURL + "/create_ID", self.data_faceID).text
+        data_faceID = {"field": "faceID"} # dictionary passed to REST API path to specify that required ID is face ID
+        faceID = requests.post(serverBaseURL + "/create_ID", data_faceID).text # REST API path generate new unique face ID
         return faceID
 
 
     def update_visitorLog(self):
-        self.data_visitorLog = {"visitID": self.visitID, "imageTimestamp": (str(time.strftime("%H.%M"))+','+str(time.time())), "faceID": self.faceID, "accountID": self.accountID}
-        requests.post(serverBaseURL + "/update_visitorLog", self.data_visitorLog)
+        # store visit details in SQL table 'visitorLog'
+        data_visitorLog = {"visitID": self.visitID, "imageTimestamp": (str(time.strftime("%H.%M"))+','+str(time.time())), "faceID": self.faceID, "accountID": self.accountID} # data to be stored in SQL table 'visitorLog'
+        requests.post(serverBaseURL + "/update_visitorLog", data_visitorLog) # REST API path store data in SQL databese
         return
 
     def update_knownFaces(self):
-        self.data_knownFaces = {"faceID": self.faceID, "faceName": "", "accountID": self.accountID}
-        requests.post(serverBaseURL + "/update_knownFaces", self.data_knownFaces)
+        # store details for new face in SQL table 'knownFaces'
+        data_knownFaces = {"faceID": self.faceID, "faceName": "", "accountID": self.accountID} # data to be stored in SQL table 'knownFaces'
+        requests.post(serverBaseURL + "/update_knownFaces", data_knownFaces) # REST API path store data in SQL database
         return
 
     def formatImage(self, visitorImage):
+        # format visitor image so suitable shape to be displayed in mobile app
         visitorImage_cropped_w = round(int(windowSize_mobile[0]) * 0.93) # target width of visitor image
         visitorImage_cropped_h = round(int(windowSize_mobile[1]) * 0.54) # target height of visitor image
         scaleFactor = visitorImage_cropped_h / visitorImage.shape[0] # factor by which height of image must be scale down to fit screen
@@ -230,28 +234,28 @@ class buttonPressed():
         visitorImage_cropped = visitorImage[0:visitorImage.shape[0],
                                visitorImage_x:visitorImage_x + visitorImage_cropped_w] # crops image width to fit screen
         self.path_visitorImage = join(path, 'Photos/visitorImage.png')
-        cv.imwrite(self.path_visitorImage, visitorImage_cropped)
-        self.uploadAWS_image(Bucket="nea-visitor-log", Key = self.visitID)
+        cv.imwrite(self.path_visitorImage, visitorImage_cropped) # store formatted visitor image locally on Raspnberry Pi
+        self.uploadAWS_image(Bucket="nea-visitor-log", Key = self.visitID) # upload formatted visitor image to AWS S3 storage
 
     def uploadAWS_image(self, **kwargs):
+        # uploads image to AWS S3 storage
         fernet = Fernet(self.accountID.encode()) # instantiate Fernet class with users accountID as the key
-        self.data_S3Key = {"accountID": self.accountID}
-        encodedKeys = requests.post(serverBaseURL + "/get_S3Key", self.data_S3Key).json() # returns json object with encoded keys
+        data_S3Key = {"accountID": self.accountID} # dictionary passed to REST API path to encode AWS S3 keys
+        encodedKeys = requests.post(serverBaseURL + "/get_S3Key", data_S3Key).json() # REST API path returns json object with encoded keys
         accessKey = fernet.decrypt(encodedKeys["accessKey_encrypted"].encode()).decode() # decode access key using 'accountID' encryption key
         secretKey = fernet.decrypt(encodedKeys["secretKey_encrypted"].encode()).decode() # decode secret key using 'accountID' encryption key
-        s3 = boto3.client("s3", aws_access_key_id=accessKey, aws_secret_access_key=secretKey)  # initialises a connection to the S3 client on AWS using the 'accessKey' and 'secretKey' sent to the API
-        s3.upload_file(Filename=self.path_visitorImage, Bucket=kwargs["Bucket"], Key=kwargs["Key"])  # uploads the image file to the S3 bucket called 'nea-audio-messages'. The name of the txt file when it is stored on S3 is the 'messageID' of the audio message which is being stored as a txt file.
-        print("Uploaded")
+        s3 = boto3.client("s3", aws_access_key_id=accessKey, aws_secret_access_key=secretKey)  # initialises a connection to the S3 client on AWS using the access key and secret key
+        s3.upload_file(Filename=self.path_visitorImage, Bucket=kwargs["Bucket"], Key=kwargs["Key"])  # uploads the image file to the S3 bucket called 'nea-visitor-log'.
         return
     
     def publish_message_ring(self):
-        client.publish("ring/{}".format(self.accountID), "{}".format(str(self.visitID)))
+        # transmit MQTT message to mobile app to notify that doorbell has been rung
+        client.publish("ring/{}".format(self.accountID), "{}".format(str(self.visitID))) # publish MQTT message to 'ring/accountID' topic
         return
-
-    
 
 
 def on_connect(client, userdata, flags, rc):
+    # callback function called if successful connection to MQTT broker
     if rc == 0: # if connection is successful
         client.publish('connected','')
     else:
@@ -261,11 +265,12 @@ def on_connect(client, userdata, flags, rc):
         client.connect("hairdresser.cloudmqtt.com", 18973)
         
 def run():
-    client.username_pw_set(username="yrczhohs", password = "qPSwbxPDQHEI")
+    # driver function when doorbell is rung
+    client.username_pw_set(username="yrczhohs", password = "qPSwbxPDQHEI") # specify MQTT broker connection details
     client.on_connect = on_connect # creates callback for successful connection with broker
-    client.connect("hairdresser.cloudmqtt.com", 18973) # parameters for broker web address and port number
+    client.connect("hairdresser.cloudmqtt.com", 18973) # connect to MQTT broker
     buttonPressed().captureImage()
-    
+
 client = mqtt.Client()
 
 
